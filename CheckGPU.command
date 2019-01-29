@@ -154,8 +154,10 @@ class CheckGPU:
             except:
                 # Failed - bail
                 return None
-            label = "Pci" if len(paths) else "PciRoot"
-            paths.append("{}({},{})".format(label,hex(dev),hex(func)))
+            if len(paths):
+                paths.append("Pci({},{})".format(hex(dev),hex(func)))
+            else:
+                paths.append("PciRoot({})".format(hex(dev)))
         if len(paths):
             return "/".join(paths)
         return None
