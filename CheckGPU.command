@@ -28,7 +28,7 @@ class CheckGPU:
             self.ioreg = self.r.run({"args":["ioreg", "-l", "-p", "IOService", "-w0"]})[0].split("\n")
         igpu = []
         for line in self.ioreg:
-            if any(x for x in dev_list if x in line):
+            if any(x for x in dev_list if x in line) and "+-o" in line:
                 igpu.append(line)
         return igpu
 
@@ -126,6 +126,40 @@ class CheckGPU:
                 return v
         return None
 
+    def get_path(self, acpi_path):
+        # Iterates the acpi pathing and returns
+        # the device path
+        # For instance, consider the following:
+        #
+        # "acpi-path" = "IOACPIPlane:/_SB/PCI0@0/PEG1@10001/PEGP@0"
+        #
+        # Splitting it by "/" and then each sub section by "@" and taking
+        # the second value (if it exists) - we then take that value, & 0xFF
+        # to get the Function id, then >> 16 & 0xFF to get the Device id.
+        #
+        # The result is: PciRoot(0x0,0x0)/Pci(0x1,0x1)/Pci(0x0,0x0)
+        #
+        path = acpi_path.split("/")
+        if not len(path):
+            return None
+        ff = int("0xFF",16)
+        paths = []
+        for p in path:
+            if not "@" in p:
+                continue
+            try:
+                node = int(p.split("@")[1],16)
+                func = node & ff
+                dev  = (node >> 16) & ff
+            except:
+                # Failed - bail
+                return None
+            label = "Pci" if len(paths) else "PciRoot"
+            paths.append("{}({},{})".format(label,hex(dev),hex(func)))
+        if len(paths):
+            return "/".join(paths)
+        return None
+
     def lprint(self, message):
         print(message)
         self.log += message + "\n"
@@ -170,17 +204,16 @@ class CheckGPU:
             for h in igpu_list:
                 h_dict = self.get_info(h)
                 try:
-                    locs = h_dict['parts']["pcidebug"].replace('"',"").split(":")
-                    loc = "PciRoot(0x{})/Pci(0x{},0x{})".format(locs[0],locs[1],locs[2])
+                    loc = self.get_path(h_dict['parts']['acpi-path'].replace('"',""))
                 except:
                     loc = "Unknown Location"
-                self.lprint(" - {} - {}".format(h_dict["name"], loc))
+                self.lprint(" - {} - {}".format(h_dict.get("name","Unknown"), loc))
                 for x in sorted(h_dict.get("parts",{})):
                     if x in gather or x.startswith(start):
                         self.lprint(" --> {}: {}".format(x,h_dict["parts"][x]))
                 self.lprint("")
         self.lprint("Locating Framebuffers and Displays...")
-        fb_list = self.get_devs([" AppleIntelFramebuffer@", " NVDA,Display-"])
+        fb_list = self.get_devs([" AppleIntelFramebuffer@", " NVDA,Display-", " ATY,AMD,RadeonFramebuffer@"])
         display = self.get_class_info("<class AppleDisplay")
         displays = {}
         if len(display):
@@ -221,7 +254,7 @@ class CheckGPU:
                     continue
                 self.lprint(" - {}".format(name))
                 # Let's look through and get whatever properties we need
-                for x in sorted(f_dict["parts"]):
+                for x in sorted(f_dict.get("parts",{})):
                     if x in gather:
                         if x == "connector-type":
                             ct = self.conn_types.get(f_dict["parts"][x],"Unknown ({})".format(f_dict["parts"][x]))
