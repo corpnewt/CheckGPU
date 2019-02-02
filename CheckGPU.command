@@ -84,7 +84,7 @@ class CheckGPU:
             for h in igpu_list:
                 h_dict = self.i.get_device_info(h)[0] # Get first occurrence
                 loc = self.i.get_device_path(h)
-                loc = loc if len(loc) else "Unknown Location"ßß
+                loc = loc if len(loc) else "Unknown Location"
                 self.lprint(" - {} - {}".format(h_dict.get("name","Unknown"), loc))
                 for x in sorted(h_dict.get("parts",{})):
                     if x in gather or x.startswith(start):
