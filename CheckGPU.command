@@ -4,6 +4,7 @@ from Scripts import *
 
 class CheckGPU:
     def __init__(self):
+        self.i = ioreg.IOReg()
         self.r = run.Run()
         self.u = utils.Utils("CheckGPU")
         self.kextstat = None
@@ -16,93 +17,6 @@ class CheckGPU:
             "<01000000>":"Dummy Port"
         }
         self.ioreg = None
-
-    def get_devs(self,dev_list = None, force = False):
-        # Iterate looking for our device(s)
-        # returns a list of devices@addr
-        if dev_list == None:
-            return []
-        if not isinstance(dev_list, list):
-            dev_list = [dev_list]
-        if force or not self.ioreg:
-            self.ioreg = self.r.run({"args":["ioreg", "-l", "-p", "IOService", "-w0"]})[0].split("\n")
-        igpu = []
-        for line in self.ioreg:
-            if any(x for x in dev_list if x in line) and "+-o" in line:
-                igpu.append(line)
-        return igpu
-
-    def get_class_info(self, class_search = None, force = False):
-        # Returns a list of all matched classes and their properties
-        if not class_search:
-            return []
-        if force or not self.ioreg:
-            self.ioreg = self.r.run({"args":["ioreg", "-l", "-p", "IOService", "-w0"]})[0].split("\n")
-        dev = []
-        primed = False
-        current = None
-        for line in self.ioreg:
-            if not primed and not class_search in line:
-                continue
-            if not primed:
-                # Has class - try to remove the "<class " header
-                primed = True
-                current = {"name":class_search.replace("<class ",""),"parts":{}}
-                continue
-            # Primed, but not IGPU
-            if "+-o" in line:
-                # Past our prime - see if we have a current, save
-                # it to the list, and clear it
-                primed = False
-                if current:
-                    dev.append(current)
-                    current = None
-                continue
-            # Primed, not class, not next device - must be info
-            try:
-                name = line.split(" = ")[0].split('"')[1]
-                current["parts"][name] = line.split(" = ")[1]
-            except Exception as e:
-                pass
-        return dev
-
-    def get_info(self, igpu):
-        # Returns a dict of the properties of the IGPU device
-        # as individual text items
-        # First split up the text and find the device
-        try:
-            hid = igpu.split("+-o ")[1].split("  ")[0]
-        except:
-            return {}
-        # Got our address - get the full info
-        hd = self.r.run({"args":["ioreg", "-p", "IODeviceTree", "-n", hid, "-w0"]})[0]
-        if not len(hd):
-            return {"name":hid}
-        primed = False
-        idevice = {"name":"Unknown", "parts":{}}
-        for line in hd.split("\n"):
-            if not primed and not hid in line:
-                continue
-            if not primed:
-                # Has our passed device
-                try:
-                    idevice["name"] = hid
-                except:
-                    idevice["name"] = "Unknown"
-                primed = True
-                continue
-            # Primed, but not IGPU
-            if "+-o" in line:
-                # Past our prime
-                primed = False
-                continue
-            # Primed, not IGPU, not next device - must be info
-            try:
-                name = line.split(" = ")[0].split('"')[1]
-                idevice["parts"][name] = line.split(" = ")[1]
-            except Exception as e:
-                pass
-        return idevice
 
     def get_kextstat(self, force = False):
         # Gets the kextstat list if needed
@@ -124,42 +38,6 @@ class CheckGPU:
                 except:
                     return "?.?"
                 return v
-        return None
-
-    def get_path(self, acpi_path):
-        # Iterates the acpi pathing and returns
-        # the device path
-        # For instance, consider the following:
-        #
-        # "acpi-path" = "IOACPIPlane:/_SB/PCI0@0/PEG1@10001/PEGP@0"
-        #
-        # Splitting it by "/" and then each sub section by "@" and taking
-        # the second value (if it exists) - we then take that value, & 0xFF
-        # to get the Function id, then >> 16 & 0xFF to get the Device id.
-        #
-        # The result is: PciRoot(0x0,0x0)/Pci(0x1,0x1)/Pci(0x0,0x0)
-        #
-        path = acpi_path.split("/")
-        if not len(path):
-            return None
-        ff = int("0xFF",16)
-        paths = []
-        for p in path:
-            if not "@" in p:
-                continue
-            try:
-                node = int(p.split("@")[1],16)
-                func = node & ff
-                dev  = (node >> 16) & ff
-            except:
-                # Failed - bail
-                return None
-            if len(paths):
-                paths.append("Pci({},{})".format(hex(dev),hex(func)))
-            else:
-                paths.append("PciRoot({})".format(hex(dev)))
-        if len(paths):
-            return "/".join(paths)
         return None
 
     def lprint(self, message):
@@ -192,7 +70,7 @@ class CheckGPU:
                 self.lprint(" --> Found v{}".format(weg_vers))
         self.lprint("")
         self.lprint("Locating GPU devices...")
-        igpu_list = self.get_devs([" IGPU@", " GFX"])
+        igpu_list = self.i.get_devices([" IGPU@", " GFX"])
         if not len(igpu_list):
             self.lprint(" - None found!")
             self.lprint("")
@@ -204,19 +82,17 @@ class CheckGPU:
             gather = ["AAPL,ig-platform-id","built-in","device-id","hda-gfx","model","NVDAType","NVArch","AAPL,slot-name"]
             start  = "framebuffer-"
             for h in igpu_list:
-                h_dict = self.get_info(h)
-                try:
-                    loc = self.get_path(h_dict['parts']['acpi-path'].replace('"',""))
-                except:
-                    loc = "Unknown Location"
+                h_dict = self.i.get_device_info(h)[0] # Get first occurrence
+                loc = self.i.get_device_path(h)
+                loc = loc if len(loc) else "Unknown Location"ßß
                 self.lprint(" - {} - {}".format(h_dict.get("name","Unknown"), loc))
                 for x in sorted(h_dict.get("parts",{})):
                     if x in gather or x.startswith(start):
                         self.lprint(" --> {}: {}".format(x,h_dict["parts"][x]))
                 self.lprint("")
         self.lprint("Locating Framebuffers and Displays...")
-        fb_list = self.get_devs([" AppleIntelFramebuffer@", " NVDA,Display-", " ATY,AMD,RadeonFramebuffer@"])
-        display = self.get_class_info("<class AppleDisplay")
+        fb_list = self.i.get_devices([" AppleIntelFramebuffer@", " NVDA,Display-", " ATY,AMD,RadeonFramebuffer@"])
+        display = self.i.get_device_info("AppleDisplay",isclass=True)
         displays = {}
         if len(display):
             # Got at least one display - let's find out which fb they're connected to
@@ -250,8 +126,8 @@ class CheckGPU:
             gather = ["connector-type"]
             for f in fb_list:
                 try:
-                    name = f.split("+-o ")[1].split("  ")[0]
-                    f_dict = self.get_class_info(name+"  ")[0]
+                    name = f
+                    f_dict = self.i.get_device_info(name+"  ")[0]
                 except:
                     continue
                 self.lprint(" - {}".format(name))
