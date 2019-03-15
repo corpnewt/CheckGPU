@@ -91,7 +91,7 @@ class CheckGPU:
                         self.lprint(" --> {}: {}".format(x,h_dict["parts"][x]))
                 self.lprint("")
         self.lprint("Locating Framebuffers and Displays...")
-        fb_list = self.i.get_devices([" AppleIntelFramebuffer@", " NVDA,Display-", " ATY,AMD,RadeonFramebuffer@"])
+        fb_list = self.i.get_devices([" AppleIntelFramebuffer@", " NVDA,Display-", "class AtiFbStub"])
         display = self.i.get_device_info("AppleDisplay",isclass=True)
         displays = {}
         if len(display):
