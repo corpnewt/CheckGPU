@@ -24,6 +24,14 @@ class CheckGPU:
             self.kextstat = self.r.run({"args":"kextstat"})[0]
         return self.kextstat
 
+    def get_boot_args(self):
+        # Attempts to pull the boot-args from nvram
+        out = self.r.run({"args":["nvram","-p"]})
+        for l in out[0].split("\n"):
+            if "boot-args" in l:
+                return "\t".join(l.split("\t")[1:])
+        return None
+
     def locate(self, kext):
         # Gathers the kextstat list - then parses for loaded kexts
         ks = self.get_kextstat()
@@ -68,6 +76,9 @@ class CheckGPU:
                 self.lprint(" --> Not loaded! GFX and audio may not work!")
             else:
                 self.lprint(" --> Found v{}".format(weg_vers))
+        self.lprint("")
+        boot_args = self.get_boot_args()
+        self.lprint("Current boot-args: {}".format(boot_args or "None set!"))
         self.lprint("")
         self.lprint("Locating GPU devices...")
         igpu_list = self.i.get_devices([" IGPU@", " GFX"])
