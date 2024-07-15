@@ -32,6 +32,14 @@ class CheckGPU:
                 return "\t".join(l.split("\t")[1:])
         return None
 
+    def get_os_version(self):
+        # Scrape sw_vers
+        prod_name  = self.r.run({"args":["sw_vers","-productName"]})[0].strip()
+        prod_vers  = self.r.run({"args":["sw_vers","-productVersion"]})[0].strip()
+        build_vers = self.r.run({"args":["sw_vers","-buildVersion"]})[0].strip()
+        if build_vers: build_vers = "({})".format(build_vers)
+        return " ".join([x for x in (prod_name,prod_vers,build_vers) if x])
+
     def locate(self, kext):
         # Gathers the kextstat list - then parses for loaded kexts
         ks = self.get_kextstat()
@@ -76,6 +84,9 @@ class CheckGPU:
                 self.lprint(" --> Not loaded! GFX and audio may not work!")
             else:
                 self.lprint(" --> Found v{}".format(weg_vers))
+        self.lprint("")
+        os_vers = self.get_os_version()
+        self.lprint("Current OS Version: {}".format(os_vers or "Unknown!"))
         self.lprint("")
         boot_args = self.get_boot_args()
         self.lprint("Current boot-args: {}".format(boot_args or "None set!"))
