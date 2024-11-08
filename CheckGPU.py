@@ -4,9 +4,17 @@ from Scripts import *
 
 class CheckGPU:
     def __init__(self):
+        self.u = utils.Utils("CheckGPU")
+        # Verify running OS
+        if not sys.platform.lower() == "darwin":
+            self.u.head("Wrong OS!")
+            print("")
+            print("This script can only be run on macOS!")
+            print("")
+            self.u.grab("Press [enter] to exit...")
+            exit(1)
         self.i = ioreg.IOReg()
         self.r = run.Run()
-        self.u = utils.Utils("CheckGPU")
         self.kextstat = None
         self.log = ""
         self.conn_types = {
