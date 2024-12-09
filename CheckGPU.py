@@ -109,7 +109,7 @@ class CheckGPU:
             self.lprint("")
             self.lprint("Iterating GPU devices:")
             self.lprint("")
-            gather = ["AAPL,ig-platform-id","built-in","device-id","hda-gfx","model","NVDAType","NVArch","AAPL,slot-name"]
+            gather = ["AAPL,ig-platform-id","built-in","device-id","hda-gfx","model","NVDAType","NVArch","AAPL,slot-name","acpi-path"]
             start  = "framebuffer-"
             for h in igpu_list:
                 h_dict = self.i.get_device_info(h)[0] # Get first occurrence
