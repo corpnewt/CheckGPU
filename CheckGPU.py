@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-import os, sys
-from Scripts import *
+import os, sys, binascii
+from Scripts import utils, ioreg, run
 
 class CheckGPU:
     def __init__(self):
@@ -100,80 +100,108 @@ class CheckGPU:
         self.lprint("Current boot-args: {}".format(boot_args or "None set!"))
         self.lprint("")
         self.lprint("Locating GPU devices...")
-        igpu_list = self.i.get_devices([" IGPU@", " GFX"])
-        if not len(igpu_list):
+        all_devs = self.i.get_all_devices(plane="IOService")
+        self.lprint("")
+        self.lprint("Iterating for devices with matching class-code...")
+        gpus = [x for x in all_devs.values() if x.get("info",{}).get("class-code","").endswith("0300>")]
+        if not len(gpus):
             self.lprint(" - None found!")
             self.lprint("")
         else:
-            self.lprint(" - Located {}".format(len(igpu_list)))
+            self.lprint(" - Located {}".format(len(gpus)))
             self.lprint("")
             self.lprint("Iterating GPU devices:")
             self.lprint("")
-            gather = ["AAPL,ig-platform-id","built-in","device-id","hda-gfx","model","NVDAType","NVArch","AAPL,slot-name","acpi-path"]
+            gather = (
+                "AAPL,ig-platform-id",
+                "built-in",
+                "device-id",
+                "vendor-id",
+                "hda-gfx",
+                "model",
+                "NVDAType",
+                "NVArch",
+                "AAPL,slot-name",
+                "acpi-path"
+            )
             start  = "framebuffer-"
-            for h in igpu_list:
-                h_dict = self.i.get_device_info(h)[0] # Get first occurrence
-                loc = self.i.get_device_path(h)
-                loc = loc if len(loc) else "Unknown Location"
-                self.lprint(" - {} - {}".format(h_dict.get("name","Unknown"), loc))
-                for x in sorted(h_dict.get("parts",{})):
+            fb_checks = (" AppleIntelFramebuffer@", " NVDA,Display-", "class AtiFbStub")
+            for g in sorted(gpus, key=lambda x:x.get("device_path","?")):
+                g_dict = g.get("info",{})
+                pcidebug_check = g_dict.get("pcidebug","").replace("??:??.?","")
+                loc = g.get("device_path")
+                self.lprint(" - {} - {}".format(g["name"], loc or "Could Not Resolve Device Path"))
+                for x in sorted(g_dict):
                     if x in gather or x.startswith(start):
-                        self.lprint(" --> {}: {}".format(x,h_dict["parts"][x]))
+                        val = g_dict[x]
+                        # Strip formatting from ioreg
+                        if x in ("device-id","vendor-id"):
+                            try:
+                                val = "0x"+binascii.hexlify(binascii.unhexlify(val[1:5])[::-1]).decode().upper()
+                            except:
+                                pass
+                        elif val.startswith('<"') and val.endswith('">'):
+                            try:
+                                val = val[2:-2]
+                            except:
+                                pass
+                        elif val.startswith("<") and val.endswith(">"):
+                            try:
+                                val = "0x"+binascii.hexlify(binascii.unhexlify(val[1:-1])[::-1]).decode().upper()
+                            except:
+                                pass
+                        elif val[0] == val[-1] == '"':
+                            try:
+                                val = val[1:-1]
+                            except:
+                                pass
+                        self.lprint(" --> {}: {}".format(x,val))
                 self.lprint("")
-        self.lprint("Locating Framebuffers and Displays...")
-        fb_list = self.i.get_devices([" AppleIntelFramebuffer@", " NVDA,Display-", "class AtiFbStub"])
-        display = self.i.get_device_info("AppleDisplay",isclass=True)
-        displays = {}
-        if len(display):
-            # Got at least one display - let's find out which fb they're connected to
-            for d in display:
-                if not "IODisplayPrefsKey" in d["parts"]:
-                    continue
-                # Get the path, and break it up - we should find our fb and GPU as the
-                # last 2 path components that contain @
-                path = d["parts"]["IODisplayPrefsKey"].split("/")[::-1]
-                gpu = fb = None
-                for x in path:
-                    if not "@" in x:
+                self.lprint("Connectors:")
+                self.lprint("")
+                # Check for any framebuffers or connected displays here
+                name_check = g["line"] # Use the line to prevent mismatching
+                primed = False
+                last_fb = None
+                fb_list = []
+                connected = "Connected to Display"
+                for line in self.i.get_ioreg():
+                    if name_check in line:
+                        primed = len(line.split("+-o ")[0])
                         continue
-                    if not fb:
-                        fb = x
+                    if primed is False:
                         continue
-                    gpu = x
-                    break
-                if not gpu in displays:
-                    displays[gpu] = []
-                displays[gpu].append(fb)
-
-        if not len(fb_list):
-            self.lprint(" - None found!")
-            self.lprint("")
-        else:
-            self.lprint(" - Located {}".format(len(fb_list)))
-            self.lprint("")
-            self.lprint("Iterating Framebuffer devices:")
-            self.lprint("")
-            gather = ["connector-type"]
-            for f in fb_list:
-                try:
-                    name = f
-                    f_dict = self.i.get_device_info(name+"  ")[0]
-                except:
-                    continue
-                self.lprint(" - {}".format(name))
-                # Let's look through and get whatever properties we need
-                for x in sorted(f_dict.get("parts",{})):
-                    if x in gather:
-                        if x == "connector-type":
-                            ct = self.conn_types.get(f_dict["parts"][x],"Unknown ({})".format(f_dict["parts"][x]))
-                            self.lprint(" --> {}: {}".format(x, ct))
-                        else:
-                            self.lprint(" --> {}: {}".format(x,f_dict["parts"][x]))
-                # Check if it's in our displays list
-                for d in displays:
-                    if name in displays[d]:
-                        self.lprint(" --> Connected to Display")
-            self.lprint("")
+                    # Make sure se have the right device
+                    # by verifying the pcidebug value
+                    if "pcidebug" in line and not pcidebug_check in line:
+                        # Unprime - wrong device
+                        primed = False
+                        continue
+                    # We're primed check for any framebuffers
+                    # or if we left our scope
+                    if "+-o " in line and len(line.split("+-o ")[0]) <= primed:
+                        break
+                    if any(f in line for f in fb_checks):
+                        # Got a framebuffer - list it
+                        fb_list.append(" - "+line.split("+-o ")[1].split("  <class")[0])
+                    if '"connector-type"' in line and fb_list:
+                        # Got a connector type after a framebuffer
+                        conn = line.split(" = ")[-1]
+                        fb_list.append(" --> connector-type: {}".format(
+                            self.conn_types.get(conn,"Unknown Connector ({})".format(conn))
+                        ))
+                    if any(c in line for c in ("<class AppleDisplay,","<class AppleBacklightDisplay,","<class IODisplayConnect,")) and fb_list:
+                        # Got a display after a framebuffer - append that as well
+                        if not fb_list[-1].endswith(connected):
+                            # If we listed a connector-type, prefix with " ----> ",
+                            # otherwise just use " --> "
+                            prefix = " --> " if fb_list[-1].startswith(" - ") else " ----> "
+                            fb_list.append(prefix+connected)
+                if fb_list:
+                    self.lprint("\n".join(fb_list))
+                else:
+                    self.lprint(" - None found!")
+                self.lprint("")
 
         print("Saving log...")
         print("")
