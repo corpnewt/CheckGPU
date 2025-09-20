@@ -114,6 +114,7 @@ class CheckGPU:
             self.lprint("")
             gather = (
                 "AAPL,ig-platform-id",
+                "AAPL,snb-platform-id",
                 "built-in",
                 "device-id",
                 "vendor-id",
